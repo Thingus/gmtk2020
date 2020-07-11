@@ -6,6 +6,8 @@ import copy
 
 import pdb
 
+from gmtk2020.level_reader import level_reader
+
 object_dict = {obj_id:None for obj_id in range(0, 300)}
 
 
