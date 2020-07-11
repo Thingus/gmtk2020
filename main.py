@@ -6,10 +6,12 @@ import copy
 
 import pdb
 
-from gmtk2020.level_reader import level_reader
+level_list=[
+    p.join("resources", "level_1.bmp"),
+    p.join("resources", "level_2.bmp")]
+current_level = 0
 
 object_dict = {obj_id:None for obj_id in range(0, 300)}
-
 
 class PygView(object):
 
@@ -24,55 +26,53 @@ class PygView(object):
         self.fps = fps
         self.playtime = 0.0
         self.font = pygame.font.SysFont("mono", 20, bold=True)
-
-        self.grid = Grid(self.surface, width, height)
         
-        # Prototyping here
-        self.player = Player(
-            self.grid,
-            Position(10,10),
-            1,
-            self.surface)
+        self.load_level(level_list[current_level])
             
-        self.wall_1 = Wall(
-            self.grid,
-            Position(8, 10),
-            2,
-            self.surface)
-            
-        self.wall_2 = Wall(
-            self.grid,
-            Position(9, 10),
-            3,
-            self.surface)
-            
-        self.pushable_1 = Pushable(
-            self.grid,
-            Position(10, 8),
-            4,
-            self.surface)
-            
-        self.pushable_2 = Pushable(
-            self.grid,
-            Position(11, 8),
-            5,
-            self.surface)
-            
-        self.reciever_1 = Reciever(
-            self.grid,
-            Position(10, 12),
-            6,
-            self.surface,
-            "foo",
-            11,11,
-            Position(5,5))
-            
-        self.player = Player(
-            self.grid,
-            Position(10,11),
-            7,
-            self.surface)
-            
+    def load_level(self, filepath):
+        global object_dict
+        object_dict = {obj_id:None for obj_id in range(0, 300)}
+        current_id = 1
+        level_surf = pygame.image.load(filepath)
+        self.grid = Grid(self.surface, self.pix_width, self.pix_height)
+        for x in range(level_surf.get_width()):
+            for y in range(level_surf.get_height()):
+                pixel = level_surf.get_at((x,y))
+                if pixel == pygame.Color("#000000"):
+                    Wall(
+                        self.grid,
+                        Position(x,y),
+                        current_id,
+                        self.surface)
+                    current_id += 1
+                elif pixel.r == 255 and pixel.b == 255 and pixel != pygame.Color("#FFFFFF"):
+                    Player(
+                        self.grid,
+                        Position(x,y),
+                        current_id,
+                        self.surface,
+                        active_at_start = pixel.b > 0)
+                    if pixel.b > 0:
+                        self.grid.current_player = current_id
+                    current_id += 1
+                elif pixel == pygame.Color("#FFFF00"):
+                    Goal(
+                        self.grid,
+                        Position(x,y),
+                        current_id,
+                        self.surface)
+                    current_id += 1
+                elif pixel.g == 255 and pixel != pygame.Color("#FFFFFF"):
+                    Reciever(
+                        self.grid,
+                        Position(x, y),
+                        current_id,
+                        self.surface,
+                        None,
+                        pixel.b, pixel.b,
+                        Position(pixel.b//2, pixel.b//2))
+                    current_id += 1
+                    
     def run(self):
         running = True
         while running:
@@ -82,8 +82,12 @@ class PygView(object):
                 elif event.type == pygame.KEYDOWN:    
                     if event.key == pygame.K_ESCAPE:
                         running = False
+                    elif event.key == pygame.K_BACKSPACE:
+                        self.load_level(level_list[current_level])
                     elif event.key == pygame.K_p:
                         pdb.set_trace()
+                    elif event.key == pygame.K_LSHIFT:
+                        self.grid.shift_players()
                     else:
                         self.step(event)
 
@@ -141,18 +145,19 @@ class Grid:
         self.surface = pygame.Surface((canvas_x, canvas_y))
         global object_dict
         object_dict[self.obj_id] = self
+        self.current_player = 0
         
     def init_grid(self,x,y):
         self.grid = [[0 for n in range(y)] for m in range(x)]
-        
-    #def add_object(self, new_object, pos):
-        
         
     def request_move(self, requester_id, direction):
         """Processes requests to move udlr on grid. Passes the request on to anything
         that might be bothers (other pushables in the way, that sort of thing).
         Returns 0 if move is successful, 1 if oob move attempted, 2 if obstacle hit"""
         requester = object_dict[requester_id]
+        if requester.has_moved_this_turn:
+            print(f"ID {requester_id} has moved already, skipping second move")
+            return 5
         req_pos = copy.copy(requester.pos)
         new_pos = copy.copy(req_pos)
         if direction.startswith('l'):
@@ -167,21 +172,36 @@ class Grid:
         if new_pos.x < 0 or new_pos.x >= self.width or new_pos.y < 0 or new_pos.y >= self.height:
             print("ID {} out of bounds move attempted".format(requester_id))
             return 1
-            
+
         obj_at_new_pos = object_dict[self.grid[new_pos.x][new_pos.y]]
-        if type(obj_at_new_pos) == Wall:
-            print("ID {} hit wall at {},{}".format(requester_id, new_pos.x, new_pos.y))
-            return 2
         
+        if type(obj_at_new_pos) == Goal:
+            print("You won! Push backspace to move onto the next level.")
+            global current_level
+            current_level += 1
+        if type(obj_at_new_pos) == Wall:
+            print("ID {} hit wall ID {} at {},{}".format(requester_id, obj_at_new_pos.obj_id, new_pos.x, new_pos.y))
+            return 2
         if issubclass(type(obj_at_new_pos), Pushable):
             is_blocked = obj_at_new_pos.move(direction)
             if is_blocked:
                 print(f"ID {requester_id} blocked by immovable mover {obj_at_new_pos} at {new_pos.x}, {new_pos.y}")
                 return 4
-        
+                
         requester.set_new_position(new_pos)
-
+        requester.has_moved_this_turn = True
         return 0
+
+        
+    def shift_players(self):
+        object_dict[self.current_player].active = False
+        self.current_player += 1
+        self.current_player = self.current_player % 300
+        while type(object_dict[self.current_player]) is not Player:
+            self.current_player += 1
+            self.current_player = self.current_player % 300
+        object_dict[self.current_player].active = True
+        
     
     # Drawing methods    
     def draw_grid(self):
@@ -250,8 +270,8 @@ class GridEntity(object):
     def draw(self):
         screen_pos = self.grid.get_screen_position(self.pos)
         self.parent_surface.blit(self.surface, (screen_pos.x, screen_pos.y))
+ 
         
-   
 class Wall(GridEntity):
     """Walls block all movement"""
     def __init__(self, grid, position, obj_id, parent_surface):
@@ -263,6 +283,18 @@ class Wall(GridEntity):
             pygame.Color("#A2A2A2"),
             pygame.Rect(2, 2, self.grid.res -4, self.grid.res-4))
         self.surface.convert()
+        
+        
+class Goal(Wall):
+    def __init__(self, grid, position, obj_id, parent_surface):
+        GridEntity.__init__(self, grid, position, obj_id, parent_surface)
+        
+    def gen_sprite(self):
+        pygame.draw.rect(
+            self.surface,
+            pygame.Color("#FFFF00"),
+            pygame.Rect(2, 2, self.grid.res -4, self.grid.res-4))
+        self.surface.convert()   
         
         
 class Trench(GridEntity):
@@ -294,14 +326,31 @@ class Pushable(GridEntity):
 
 class Player(Pushable):
     
-    def __init__(self, grid, position, obj_id, parent_surface):
+    def __init__(self, grid, position, obj_id, parent_surface, active_at_start = False):
         GridEntity.__init__(self, grid, position, obj_id, parent_surface)
-        self.surface = pygame.image.load(p.join("resources","myguy.bmp"))
-        self.surface = pygame.transform.scale(self.surface, (grid.res, grid.res))
-        self.surface.convert_alpha()
         self.command_recieved = False
-            
-            
+        self.active = active_at_start
+        
+    def gen_sprite(self):
+        self.surface = pygame.image.load(p.join("resources","myguy.bmp"))
+        self.surface = pygame.transform.scale(self.surface, (self.grid.res, self.grid.res))
+        self.surface.convert_alpha()
+        self.is_selected_surface = pygame.Surface((self.grid.res, self.grid.res))
+        pygame.draw.rect(
+            self.is_selected_surface,
+            pygame.Color("#FFFF00"),
+            pygame.Rect(5, 5, self.grid.res -10, self.grid.res-10))
+        self.is_selected_surface.set_alpha(25)
+        
+    def draw(self):
+        if self.active:
+            self.is_selected_surface.set_alpha(25)
+        else:
+            self.is_selected_surface.set_alpha(0)
+        self.surface.blit(self.is_selected_surface, (0,0))
+        GridEntity.draw(self)
+                
+                        
 class Reciever(Pushable):
     def __init__(self, grid, position, obj_id, parent_surface,
                 commands, field_width, field_height, pos_in_field):
@@ -349,10 +398,12 @@ class Reciever(Pushable):
         for player in object_dict.values():
             if type(player)==Player:
                 if self.field.collidepoint(player.pos.x, player.pos.y) \
-                and not player.command_recieved:
+                and player.active:
                     if command in ['up', 'down', 'left', 'right']:
                         player.move(command)
                         player.command_recieved = True
+                    if command == "switch":
+                        self.grid.shift_players()
     
     def draw_field(self):
         pygame.draw.rect(
