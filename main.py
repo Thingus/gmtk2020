@@ -3,19 +3,26 @@ import os.path as p
 import pygame
 from random import randint
 import copy
+import math
 
 import pdb
 
 level_list=[
-    p.join("resources", "level_1.bmp"),
-    p.join("resources", "level_2.bmp")]
+    #p.join("resources", "level_1.bmp"),
+    p.join("resources", "level_2.bmp"),
+    #p.join("resources", "test_level.bmp")
+    ]
 current_level = 0
 
 object_dict = {obj_id:None for obj_id in range(0, 300)}
 
+frame_count = 0
+
+RES = 64
+
 class PygView(object):
 
-    def __init__(self, width=640*2+1, height=480*2+1, fps=30):
+    def __init__(self, width=32*RES+1, height=24*RES+1, fps=30):
         pygame.init()
         pygame.display.set_caption("ESC to quit")
         self.pix_width = width
@@ -26,7 +33,6 @@ class PygView(object):
         self.fps = fps
         self.playtime = 0.0
         self.font = pygame.font.SysFont("mono", 20, bold=True)
-        
         self.load_level(level_list[current_level])
             
     def load_level(self, filepath):
@@ -38,6 +44,8 @@ class PygView(object):
         for x in range(level_surf.get_width()):
             for y in range(level_surf.get_height()):
                 pixel = level_surf.get_at((x,y))
+                if pixel == pygame.Color("#FFFFFF"):
+                    continue
                 if pixel == pygame.Color("#000000"):
                     Wall(
                         self.grid,
@@ -45,14 +53,15 @@ class PygView(object):
                         current_id,
                         self.surface)
                     current_id += 1
-                elif pixel.r == 255 and pixel.b == 255 and pixel != pygame.Color("#FFFFFF"):
+                elif pixel.r == 255 and pixel.b == 255:
                     Player(
                         self.grid,
                         Position(x,y),
                         current_id,
                         self.surface,
-                        active_at_start = pixel.b > 0)
-                    if pixel.b > 0:
+                        active_at_start = pixel.g > 0)
+                    if pixel.g > 0:
+                        print(f"Starting player is {current_id}")
                         self.grid.current_player = current_id
                     current_id += 1
                 elif pixel == pygame.Color("#FFFF00"):
@@ -62,7 +71,7 @@ class PygView(object):
                         current_id,
                         self.surface)
                     current_id += 1
-                elif pixel.g == 255 and pixel != pygame.Color("#FFFFFF"):
+                elif pixel.g == 255:
                     Reciever(
                         self.grid,
                         Position(x, y),
@@ -74,8 +83,10 @@ class PygView(object):
                     current_id += 1
                     
     def run(self):
+        global frame_count
         running = True
         while running:
+            frame_count += 1 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
@@ -116,12 +127,14 @@ class PygView(object):
                     if event.key == pygame.K_d:
                         reciever.signal('right')
                         
-        # Reset every player command_recieved state
+        # Reset every player command_recieved state and check for loss state
         for thing in object_dict.values():
             if issubclass(type(thing),GridEntity):
                 thing.has_moved_this_turn = False
             if type(thing) == Player:
                 thing.command_recieved = False
+        
+        
                 
 
 class Position:
@@ -133,7 +146,7 @@ class Position:
 
 class Grid:
     """A grid for every object to move around on"""
-    def __init__(self, parent_surface, canvas_x, canvas_y, resolution = 40):
+    def __init__(self, parent_surface, canvas_x, canvas_y, resolution = RES):
         self.obj_id = 0
         self.pix_width = canvas_x
         self.pix_height = canvas_y
@@ -146,6 +159,11 @@ class Grid:
         global object_dict
         object_dict[self.obj_id] = self
         self.current_player = 0
+        
+        self.stop_sample = pygame.mixer.Sound(p.join("resources", "nope_bloop.wav"))
+        self.move_sample = pygame.mixer.Sound(p.join("resources", "low_buzz.wav"))
+        
+        self.gen_background()
         
     def init_grid(self,x,y):
         self.grid = [[0 for n in range(y)] for m in range(x)]
@@ -171,6 +189,7 @@ class Grid:
             
         if new_pos.x < 0 or new_pos.x >= self.width or new_pos.y < 0 or new_pos.y >= self.height:
             print("ID {} out of bounds move attempted".format(requester_id))
+            self.stop_sample.play()
             return 1
 
         obj_at_new_pos = object_dict[self.grid[new_pos.x][new_pos.y]]
@@ -181,17 +200,19 @@ class Grid:
             current_level += 1
         if type(obj_at_new_pos) == Wall:
             print("ID {} hit wall ID {} at {},{}".format(requester_id, obj_at_new_pos.obj_id, new_pos.x, new_pos.y))
+            self.stop_sample.play()
             return 2
         if issubclass(type(obj_at_new_pos), Pushable):
             is_blocked = obj_at_new_pos.move(direction)
             if is_blocked:
                 print(f"ID {requester_id} blocked by immovable mover {obj_at_new_pos} at {new_pos.x}, {new_pos.y}")
+                self.stop_sample.play()
                 return 4
                 
         requester.set_new_position(new_pos)
         requester.has_moved_this_turn = True
+        #self.move_sample.play()
         return 0
-
         
     def shift_players(self):
         object_dict[self.current_player].active = False
@@ -202,14 +223,26 @@ class Grid:
             self.current_player = self.current_player % 300
         object_dict[self.current_player].active = True
         
-    
+    def gen_background(self):
+        tile = pygame.image.load(p.join("resources", "bg_tile.bmp"))
+        tile = pygame.transform.scale(tile, (self.res, self.res))
+        for x in range(self.width):
+            for y in range(self.height):
+                this_tile = pygame.transform.rotate(tile, 90*randint(0,3))
+                if randint(0,1):
+                    this_tile = pygame.transform.flip(this_tile, True, False)
+                screen_pos = self.get_screen_position(Position(x,y))
+                self.surface.blit(this_tile, (screen_pos.x, screen_pos.y))
+        
+        
     # Drawing methods    
     def draw_grid(self):
         # Draw background
         pygame.draw.rect(
             self.surface,
-            pygame.Color(0,0,0),
+            pygame.Color("#5D1000"),
             pygame.Rect(0,0,self.pix_width, self.pix_height))
+        return
         # Draw horizontal lines
         for y in range(0, self.pix_height, self.res):
             pygame.draw.line(
@@ -233,9 +266,9 @@ class Grid:
         return Position(x,y)
         
     def draw(self):
-        """Draws every sprite in the grid"""
+        """Draws the grid itself"""
         #draw the grid for debug
-        self.draw_grid()
+        #self.draw_grid()
         self.parent_surface.blit(self.surface, (0, 0))
         
      
@@ -278,10 +311,10 @@ class Wall(GridEntity):
         GridEntity.__init__(self, grid, position, obj_id, parent_surface)
         
     def gen_sprite(self):
-        pygame.draw.rect(
-            self.surface,
-            pygame.Color("#A2A2A2"),
-            pygame.Rect(2, 2, self.grid.res -4, self.grid.res-4))
+        mount_index = randint(1,2)
+        self.surface = pygame.image.load(p.join("resources",f"mountain_{mount_index}.bmp"))
+        self.surface = pygame.transform.scale(self.surface, (self.grid.res, self.grid.res))
+        self.surface.set_colorkey(pygame.Color("#FFFFFF"))
         self.surface.convert()
         
         
@@ -332,23 +365,25 @@ class Player(Pushable):
         self.active = active_at_start
         
     def gen_sprite(self):
-        self.surface = pygame.image.load(p.join("resources","myguy.bmp"))
+        self.surface = pygame.image.load(p.join("resources","rover_location.bmp"))
         self.surface = pygame.transform.scale(self.surface, (self.grid.res, self.grid.res))
-        self.surface.convert_alpha()
+        self.surface.set_colorkey(pygame.Color("#FFFFFF"))
         self.is_selected_surface = pygame.Surface((self.grid.res, self.grid.res))
         pygame.draw.rect(
             self.is_selected_surface,
             pygame.Color("#FFFF00"),
             pygame.Rect(5, 5, self.grid.res -10, self.grid.res-10))
-        self.is_selected_surface.set_alpha(25)
         
     def draw(self):
-        if self.active:
-            self.is_selected_surface.set_alpha(25)
+        GridEntity.draw(self)
+        if self.active and frame_count %30 < 5:
+            self.is_selected_surface.set_alpha(50)
         else:
             self.is_selected_surface.set_alpha(0)
-        self.surface.blit(self.is_selected_surface, (0,0))
-        GridEntity.draw(self)
+        self.is_selected_surface.convert()
+        scr_pos = self.grid.get_screen_position(self.pos)
+        self.parent_surface.blit(self.is_selected_surface, (scr_pos.x, scr_pos.y))
+        
                 
                         
 class Reciever(Pushable):
@@ -364,6 +399,7 @@ class Reciever(Pushable):
         self.field = pygame.Rect(field_ul_x, field_ul_y, field_width, field_height)
         self.pos_in_field = pos_in_field
         self.is_active = True
+        self.field_alpha = 50
         
     def gen_sprite(self):
         # Draw a cross
@@ -410,7 +446,8 @@ class Reciever(Pushable):
             self.field_surface,
             pygame.Color("#00FF00"),
             pygame.Rect(0,0,self.grid.res * self.field.width, self.grid.res * self.field.height))
-        self.field_surface.set_alpha(50)
+        self.field_alpha = math.sin(frame_count/75)*40 + 75
+        self.field_surface.set_alpha(self.field_alpha)
         field_ul = Position(self.pos.x - self.pos_in_field.x, self.pos.y - self.pos_in_field.y)
         screen_pos = self.grid.get_screen_position(field_ul)
         self.parent_surface.blit(self.field_surface, (screen_pos.x, screen_pos.y))
