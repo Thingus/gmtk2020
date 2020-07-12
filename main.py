@@ -8,9 +8,9 @@ import math
 import pdb
 
 level_list=[
-    #p.join("resources", "level_1.bmp"),
+    p.join("resources", "level_1.bmp"),
     p.join("resources", "level_2.bmp"),
-    #p.join("resources", "test_level.bmp")
+    p.join("resources", "test_level.bmp")
     ]
 current_level = 0
 
@@ -19,6 +19,7 @@ object_dict = {obj_id:None for obj_id in range(0, 300)}
 frame_count = 0
 
 RES = 64
+THEME = 'neon'  # Can be neon or rubbish
 
 class PygView(object):
 
@@ -75,7 +76,7 @@ class PygView(object):
                     Reciever(
                         self.grid,
                         Position(x, y),
-                        current_id,
+                        current_id + 100,  # Kludge so that fields end up on top
                         self.surface,
                         None,
                         pixel.b, pixel.b,
@@ -128,14 +129,19 @@ class PygView(object):
                         reciever.signal('right')
                         
         # Reset every player command_recieved state and check for loss state
+        is_failed = True
         for thing in object_dict.values():
             if issubclass(type(thing),GridEntity):
                 thing.has_moved_this_turn = False
             if type(thing) == Player:
                 thing.command_recieved = False
+            if type(thing) == Reciever:
+                if is_failed and thing.check_player_in_range():
+                    is_failed = False
+        if is_failed:
+            print("No players in range of recievers. Press backspace to reset.")
+            
         
-        
-                
 
 class Position:
     """An x,y location in the grid. 0,0 is tl corner"""
@@ -156,13 +162,13 @@ class Grid:
         self.height = canvas_y//resolution
         self.init_grid(self.width, self.height)
         self.surface = pygame.Surface((canvas_x, canvas_y))
+        
         global object_dict
         object_dict[self.obj_id] = self
+        
         self.current_player = 0
-        
-        self.stop_sample = pygame.mixer.Sound(p.join("resources", "nope_bloop.wav"))
-        self.move_sample = pygame.mixer.Sound(p.join("resources", "low_buzz.wav"))
-        
+        self.move_sample = pygame.mixer.Sound(p.join("resources", THEME, "270335__littlerobotsoundfactory__shoot-03.wav"))
+        #self.victory_jingle = pygame.mixer.Sound(p.join("resources", THEME, "270304__littlerobotsoundfactory__collect-point-00.wav"))
         self.gen_background()
         
     def init_grid(self,x,y):
@@ -189,29 +195,27 @@ class Grid:
             
         if new_pos.x < 0 or new_pos.x >= self.width or new_pos.y < 0 or new_pos.y >= self.height:
             print("ID {} out of bounds move attempted".format(requester_id))
-            self.stop_sample.play()
             return 1
 
         obj_at_new_pos = object_dict[self.grid[new_pos.x][new_pos.y]]
         
         if type(obj_at_new_pos) == Goal:
             print("You won! Push backspace to move onto the next level.")
+            #self.victory_jingle.play()
             global current_level
             current_level += 1
         if type(obj_at_new_pos) == Wall:
             print("ID {} hit wall ID {} at {},{}".format(requester_id, obj_at_new_pos.obj_id, new_pos.x, new_pos.y))
-            self.stop_sample.play()
             return 2
         if issubclass(type(obj_at_new_pos), Pushable):
             is_blocked = obj_at_new_pos.move(direction)
             if is_blocked:
                 print(f"ID {requester_id} blocked by immovable mover {obj_at_new_pos} at {new_pos.x}, {new_pos.y}")
-                self.stop_sample.play()
                 return 4
                 
         requester.set_new_position(new_pos)
         requester.has_moved_this_turn = True
-        #self.move_sample.play()
+        self.move_sample.play()
         return 0
         
     def shift_players(self):
@@ -224,7 +228,7 @@ class Grid:
         object_dict[self.current_player].active = True
         
     def gen_background(self):
-        tile = pygame.image.load(p.join("resources", "bg_tile.bmp"))
+        tile = pygame.image.load(p.join("resources", THEME,"bg_tile.bmp"))
         tile = pygame.transform.scale(tile, (self.res, self.res))
         for x in range(self.width):
             for y in range(self.height):
@@ -311,8 +315,8 @@ class Wall(GridEntity):
         GridEntity.__init__(self, grid, position, obj_id, parent_surface)
         
     def gen_sprite(self):
-        mount_index = randint(1,2)
-        self.surface = pygame.image.load(p.join("resources",f"mountain_{mount_index}.bmp"))
+        #mount_index = randint(1)
+        self.surface = pygame.image.load(p.join("resources",THEME,f"mountain_1.bmp"))
         self.surface = pygame.transform.scale(self.surface, (self.grid.res, self.grid.res))
         self.surface.set_colorkey(pygame.Color("#FFFFFF"))
         self.surface.convert()
@@ -323,10 +327,8 @@ class Goal(Wall):
         GridEntity.__init__(self, grid, position, obj_id, parent_surface)
         
     def gen_sprite(self):
-        pygame.draw.rect(
-            self.surface,
-            pygame.Color("#FFFF00"),
-            pygame.Rect(2, 2, self.grid.res -4, self.grid.res-4))
+        self.surface = pygame.image.load(p.join("resources",THEME,f"goal.bmp"))
+        self.surface = pygame.transform.scale(self.surface, (self.grid.res, self.grid.res))
         self.surface.convert()   
         
         
@@ -365,7 +367,7 @@ class Player(Pushable):
         self.active = active_at_start
         
     def gen_sprite(self):
-        self.surface = pygame.image.load(p.join("resources","rover_location.bmp"))
+        self.surface = pygame.image.load(p.join("resources",THEME,"rover_location.bmp"))
         self.surface = pygame.transform.scale(self.surface, (self.grid.res, self.grid.res))
         self.surface.set_colorkey(pygame.Color("#FFFFFF"))
         self.is_selected_surface = pygame.Surface((self.grid.res, self.grid.res))
@@ -402,18 +404,9 @@ class Reciever(Pushable):
         self.field_alpha = 50
         
     def gen_sprite(self):
-        # Draw a cross
-        pygame.draw.line(
-            self.surface,
-            pygame.Color("#FFFFFF"),
-            (6,6),
-            (self.grid.res-6, self.grid.res-6))
-        pygame.draw.line(
-            self.surface,
-            pygame.Color("#FFFFFF"),
-            (6, self.grid.res - 6),
-            (self.grid.res - 6, 6))
-        self.surface.convert()
+        self.surface = pygame.image.load(p.join("resources",THEME,f"reciever.bmp"))
+        self.surface = pygame.transform.scale(self.surface, (self.grid.res, self.grid.res))
+        self.surface.convert() 
         
     def move(self, direction):
         blocked = Pushable.move(self, direction)
@@ -440,6 +433,14 @@ class Reciever(Pushable):
                         player.command_recieved = True
                     if command == "switch":
                         self.grid.shift_players()
+                        
+    def check_player_in_range(self):
+        # Returns true if a player is in range of this. It's near the deadline and I don't want to handle the state
+        for player in object_dict.values():
+            if type(player) == Player:
+                if self.field.collidepoint(player.pos.x, player.pos.y):
+                    return True
+        return False
     
     def draw_field(self):
         pygame.draw.rect(
