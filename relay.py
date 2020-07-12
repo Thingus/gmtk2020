@@ -4,21 +4,18 @@ import pygame
 from random import randint
 import copy
 import math
+import glob
 
 import pdb
 
-level_list=[
-    p.join("resources", "level_1.bmp"),
-    p.join("resources", "level_2.bmp"),
-    p.join("resources", "test_level.bmp")
-    ]
+level_list=[]
 current_level = 0
 
 object_dict = {obj_id:None for obj_id in range(0, 300)}
 
 frame_count = 0
 
-RES = 64
+RES = 32
 THEME = 'neon'  # Can be neon or rubbish
 
 class PygView(object):
@@ -34,7 +31,13 @@ class PygView(object):
         self.fps = fps
         self.playtime = 0.0
         self.font = pygame.font.SysFont("mono", 20, bold=True)
+        
+        self.init_level_list()
         self.load_level(level_list[current_level])
+        
+    def init_level_list(self):
+        global level_list
+        level_list = glob.glob(p.join("resources", "levels", "*"))
             
     def load_level(self, filepath):
         global object_dict
@@ -204,6 +207,7 @@ class Grid:
             #self.victory_jingle.play()
             global current_level
             current_level += 1
+            view.load_level(level_list[current_level])
         if type(obj_at_new_pos) == Wall:
             print("ID {} hit wall ID {} at {},{}".format(requester_id, obj_at_new_pos.obj_id, new_pos.x, new_pos.y))
             return 2
@@ -215,7 +219,7 @@ class Grid:
                 
         requester.set_new_position(new_pos)
         requester.has_moved_this_turn = True
-        self.move_sample.play()
+        #self.move_sample.play()   # Taking this out till I can make it less obnoxious
         return 0
         
     def shift_players(self):
@@ -457,8 +461,10 @@ class Reciever(Pushable):
         Pushable.draw(self)
         self.draw_field()
 
+view = PygView()
+
 if __name__ == "__main__":
-    PygView().run()
+    view.run()
     
     
     
