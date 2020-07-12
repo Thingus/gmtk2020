@@ -18,6 +18,9 @@ frame_count = 0
 RES = 32
 THEME = 'neon'  # Can be neon or rubbish
 
+has_failed = False
+on_title = True
+
 class PygView(object):
 
     def __init__(self, width=32*RES+1, height=24*RES+1, fps=30):
@@ -32,6 +35,11 @@ class PygView(object):
         self.playtime = 0.0
         self.font = pygame.font.SysFont("mono", 20, bold=True)
         
+        self.ooc_surface = pygame.image.load(p.join("resources","neon","out_of_control.bmp"))
+        self.ooc_surface = pygame.transform.scale(self.ooc_surface, (width, height))
+        self.title_surface = pygame.image.load(p.join("resources","neon","title.bmp"))
+        self.title_surface = pygame.transform.scale(self.title_surface, (width, height))
+        
         self.init_level_list()
         self.load_level(level_list[current_level])
         
@@ -41,6 +49,8 @@ class PygView(object):
             
     def load_level(self, filepath):
         global object_dict
+        global has_failed
+        has_failed = False
         object_dict = {obj_id:None for obj_id in range(0, 300)}
         current_id = 1
         level_surf = pygame.image.load(filepath)
@@ -88,13 +98,16 @@ class PygView(object):
                     
     def run(self):
         global frame_count
+        global on_title
         running = True
         while running:
             frame_count += 1 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                elif event.type == pygame.KEYDOWN:    
+                elif event.type == pygame.KEYDOWN:
+                    if on_title:
+                        on_title = False
                     if event.key == pygame.K_ESCAPE:
                         running = False
                     elif event.key == pygame.K_BACKSPACE:
@@ -111,6 +124,10 @@ class PygView(object):
                     updateable.update()
             pygame.display.flip()
             self.screen.blit(self.surface, (0,0))
+            if has_failed:
+                self.screen.blit(self.ooc_surface, (0,0))
+            if on_title:
+                self.screen.blit(self.title_surface, (0,0))
             for drawable in object_dict.values():
                 if "draw" in dir(drawable):
                     drawable.draw()
@@ -143,6 +160,8 @@ class PygView(object):
                     is_failed = False
         if is_failed:
             print("No players in range of recievers. Press backspace to reset.")
+            global has_failed
+            has_failed = True
             
         
 
@@ -277,6 +296,8 @@ class Grid:
         """Draws the grid itself"""
         #draw the grid for debug
         #self.draw_grid()
+        if frame_count % 10 ==0:
+            self.gen_background()
         self.parent_surface.blit(self.surface, (0, 0))
         
      
